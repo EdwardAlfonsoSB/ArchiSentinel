@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Plantilla de CloudFormation para el proyecto ArchiSentinel, generada a partir de un inventario de componentes.
+  Este stack despliega una arquitectura web serverless completa.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Nombre del proyecto, usado como prefijo para los recursos.
+    Default: ArchiSentinelApp
+  EnvironmentName:
+    Type: String
+    Description: Nombre del entorno (dev, qa, prod).
+    Default: dev
+    AllowedValues: [dev, qa, prod]
+
+Resources:
+  # --- 1. Almacenamiento Frontend (S3 Bucket) ---
+  WebAppHostingS3:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-spa-hosting-${EnvironmentName}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      Tags:
+        - Key: Name
+          Value: !Ref ProjectName
+
+  # --- 2. Autenticación (Cognito) ---
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-user-pool-${EnvironmentName}"
+      # FIXME: Completa la configuración de Cognito (políticas de contraseña, MFA, etc.)
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      Tags:
+        - Key: Name
+          Value: !Ref ProjectName
+
+  # --- 3. CDN y Seguridad Perimetral (CloudFront, WAF, Shield) ---
+  WebAppCDN:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "CDN para ${ProjectName}"
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt WebAppHostingS3.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: "" # FIXME: Se recomienda usar OAI o OAC para restringir el acceso al bucket
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          # FIXME: Ajusta las políticas de caché según tus necesidades
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        # FIXME: Asocia el WebACL una vez creado
+        # WebACLId: !Ref WebAppFirewall
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+        - Key: Name
+          Value: !Ref ProjectName
+
+  WebAppFirewall:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub "${ProjectName}-web-acl-${EnvironmentName}"
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${ProjectName}-waf-metrics"
+        SampledRequestsEnabled: true
+      # FIXME: Añade tus reglas. Ejemplo: AWS Managed Rules
+      # Rules:
+      #   - Name: AWS-AWSManagedRulesCommonRuleSet
+      #     Priority: 10
+      #     Statement:
+      #       ManagedRuleGroupStatement:
+      #         VendorName: AWS
+      #         Name: AWSManagedRulesCommonRuleSet
+      #     OverrideAction:
+      #       None: {}
+      #     VisibilityConfig:
+      #       SampledRequestsEnabled: true
+      #       CloudWatchMetricsEnabled: true
+      #       MetricName: AWSManagedRulesCommonRuleSet
+
+  # NOTA: AWS Shield Standard se activa automáticamente en CloudFront y otros servicios.
+  # La creación de un recurso AWS::Shield::Protection es para AWS Shield Advanced.
+
+  # --- 4. Backend (API Gateway & Lambda) ---
+  MainAPIGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${ProjectName}-api-${EnvironmentName}"
+      Description: API principal para la aplicación.
+      # FIXME: Añade modelos, autorizadores (Cognito) y configuración de CORS.
+
+  ListItemsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-ListItemsFunction-${EnvironmentName}"
+      Runtime: nodejs20.x # FIXME: Especifica el runtime correcto
+      Handler: index.handler # FIXME: Especifica el handler correcto
+      Role: !GetAtt AppIAMLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: "my-lambda-code-bucket" # FIXME: Reemplaza con el bucket donde está tu código
+        S3Key: "list-items.zip" # FIXME: Reemplaza con el path a tu paquete de despliegue
+      # FIXME: Configura Triggers (integración con API Gateway), variables de entorno, etc.
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ListItemsFunction"
+
+  CreateItemsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-CreateItemsFunction-${EnvironmentName}"
+      Runtime: nodejs20.x # FIXME: Especifica el runtime correcto
+      Handler: index.handler # FIXME: Especifica el handler correcto
+      Role: !GetAtt AppIAMLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: "my-lambda-code-bucket" # FIXME: Reemplaza con el bucket donde está tu código
+        S3Key: "create-items.zip" # FIXME: Reemplaza con el path a tu paquete de despliegue
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-CreateItemsFunction"
+
+  DeleteItemsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-DeleteItemsFunction-${EnvironmentName}"
+      Runtime: nodejs20.x # FIXME: Especifica el runtime correcto
+      Handler: index.handler # FIXME: Especifica el handler correcto
+      Role: !GetAtt AppIAMLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: "my-lambda-code-bucket" # FIXME: Reemplaza con el bucket donde está tu código
+        S3Key: "delete-items.zip" # FIXME: Reemplaza con el path a tu paquete de despliegue
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-DeleteItemsFunction"
+  
+  # --- 5. IAM y Monitoreo (Rol y CloudWatch) ---
+  AppIAMLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-lambda-exec-role-${EnvironmentName}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      # FIXME: Adjunta políticas con los permisos mínimos necesarios para tus Lambdas (ej. acceso a DynamoDB, S3, etc.)
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AppMonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${ProjectName}-Dashboard-${EnvironmentName}"
+      DashboardBody: |
+        {
+          "widgets": [
+            # FIXME: Añade widgets para monitorear las métricas de Lambda, API Gateway, etc.
+          ]
+        }
+
+Outputs:
+  CloudFrontURL:
+    Description: URL de la distribución de CloudFront para acceder a la aplicación.
+    Value: !GetAtt WebAppCDN.DomainName
+  S3BucketName:
+    Description: Nombre del bucket S3 que aloja el SPA.
+    Value: !Ref WebAppHostingS3
+  ApiGatewayInvokeURL:
+    Description: URL base de la API Gateway.
+    Value: !Sub "https://${MainAPIGateway}.execute-api.${AWS::Region}.amazonaws.com/prod" # FIXME: Reemplaza 'prod' por tu stage
+  CognitoUserPoolId:
+    Description: ID del User Pool de Cognito.
+    Value: !Ref UserPool
