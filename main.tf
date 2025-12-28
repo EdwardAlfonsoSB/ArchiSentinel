@@ -1,52 +1,169 @@
 provider "aws" {
-  region = var.aws_region
+  region = "us-east-1"
 }
 
-# --- Red ---
-resource "aws_vpc" "main" {
-  cidr_block = var.vpc_cidr_block
-  tags = {
-    Name = "${var.project_name}-vpc"
+# ---------------------------------------------------------
+# 1. VPC Endpoint
+# JSON ID: VPC_Endpoint
+# ---------------------------------------------------------
+resource "aws_vpc_endpoint" "VPC_Endpoint" {
+  vpc_id       = "vpc-mock-id-12345"
+  service_name = "com.amazonaws.us-east-1.s3"
+  vpc_endpoint_type = "Gateway"
+}
+
+# ---------------------------------------------------------
+# 2. Lambda: Listar
+# JSON ID: Lambda_Listar
+# ---------------------------------------------------------
+resource "aws_lambda_function" "Lambda_Listar" {
+  function_name = "ListarItemsFunction"
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+  role          = aws_iam_role.Roles.arn
+}
+
+# ---------------------------------------------------------
+# 3. Lambda: Crear
+# JSON ID: Lambda_Crear
+# ---------------------------------------------------------
+resource "aws_lambda_function" "Lambda_Crear" {
+  function_name = "CrearItemsFunction"
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+  role          = aws_iam_role.Roles.arn
+}
+
+# ---------------------------------------------------------
+# 4. VPC Link (Conectividad API Gateway)
+# JSON ID: VPC_Link
+# ---------------------------------------------------------
+resource "aws_api_gateway_vpc_link" "VPC_Link" {
+  name        = "vpc-link-interno"
+  target_arns = [] # Se requeriría un NLB real aquí
+}
+
+# ---------------------------------------------------------
+# 5. API Gateway
+# JSON ID: Api_Gateway
+# ---------------------------------------------------------
+resource "aws_api_gateway_rest_api" "Api_Gateway" {
+  name        = "MiApiPrincipal"
+  description = "Gateway principal de la arquitectura"
+}
+
+# ---------------------------------------------------------
+# 6. IAM (Servicio General / Alias)
+# JSON ID: IAM
+# ---------------------------------------------------------
+resource "aws_iam_account_alias" "IAM" {
+  account_alias = "alias-cuenta-arquitectura"
+}
+
+# ---------------------------------------------------------
+# 7. Roles IAM
+# JSON ID: Roles
+# ---------------------------------------------------------
+resource "aws_iam_role" "Roles" {
+  name = "RolEjecucionLambda"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+    }]
+  })
+}
+
+# ---------------------------------------------------------
+# 8. Permisos IAM (Políticas)
+# JSON ID: Permisos
+# ---------------------------------------------------------
+resource "aws_iam_policy" "Permisos" {
+  name        = "PoliticaAccesoDynamoDB"
+  description = "Permisos de lectura y escritura"
+  policy      = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action   = ["dynamodb:*"]
+      Effect   = "Allow"
+      Resource = "*"
+    }]
+  })
+}
+
+# ---------------------------------------------------------
+# 9. CloudWatch (Dashboard)
+# JSON ID: Cloudwatch
+# ---------------------------------------------------------
+resource "aws_cloudwatch_dashboard" "Cloudwatch" {
+  dashboard_name = "DashboardOperativo"
+  dashboard_body = "{\"widgets\":[]}"
+}
+
+# ---------------------------------------------------------
+# 10. WAF (Web Application Firewall)
+# JSON ID: WAF
+# ---------------------------------------------------------
+resource "aws_wafv2_web_acl" "WAF" {
+  name        = "WAF-FrontEnd"
+  description = "Protección para CloudFront"
+  scope       = "CLOUDFRONT"
+  
+  default_action {
+    allow {}
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "WAFMetrics"
+    sampled_requests_enabled   = true
   }
 }
 
-resource "aws_subnet" "public" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = var.public_subnet_cidr_block
-  tags = {
-    Name = "${var.project_name}-public-subnet"
-  }
+# ---------------------------------------------------------
+# 11. Shield (Protección DDoS)
+# JSON ID: Shield
+# ---------------------------------------------------------
+resource "aws_shield_protection" "Shield" {
+  name         = "ProteccionDDoS-CDN"
+  resource_arn = aws_cloudfront_distribution.Cloudront.arn
 }
 
-resource "aws_subnet" "private" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = var.private_subnet_cidr_block
-  tags = {
-    Name = "${var.project_name}-private-subnet"
-  }
+# ---------------------------------------------------------
+# 12. Cognito (User Pool)
+# JSON ID: Cognito
+# ---------------------------------------------------------
+resource "aws_cognito_user_pool" "Cognito" {
+  name = "UserPool-UsuariosApp"
 }
 
-# --- Almacenamiento Frontend (S3) ---
-resource "aws_s3_bucket" "web_app_hosting" {
-  bucket = "${var.project_name}-spa-hosting-${var.environment}"
-  # TODO: Configurar como website hosting si es necesario y añadir políticas de bucket.
-  tags = {
-    Name = "WebAppHostingS3"
-  }
-}
-
-# --- CDN (CloudFront) ---
-resource "aws_cloudfront_distribution" "web_app_cdn" {
+# ---------------------------------------------------------
+# 13. CloudFront
+# JSON ID: Cloudront (Nota: Mantenemos el nombre SIN la 'f' para coincidir con el JSON)
+# ---------------------------------------------------------
+resource "aws_cloudfront_distribution" "Cloudront" {
   origin {
-    domain_name = aws_s3_bucket.web_app_hosting.bucket_regional_domain_name
-    origin_id   = "S3-${aws_s3_bucket.web_app_hosting.id}"
+    domain_name = aws_s3_bucket.S3_SPA_Codigo_estatico.bucket_regional_domain_name
+    origin_id   = "S3Origin"
   }
+
   enabled             = true
-  is_ipv6_enabled     = true
   default_root_object = "index.html"
 
-  # TODO: Configurar OAI, WAF, y comportamientos de caché específicos.
-  
+  default_cache_behavior {
+    allowed_methods  = ["GET", "HEAD"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "S3Origin"
+    viewer_protocol_policy = "redirect-to-https"
+    
+    forwarded_values {
+      query_string = false
+      cookies { forward = "none" }
+    }
+  }
+
   viewer_certificate {
     cloudfront_default_certificate = true
   }
@@ -56,84 +173,12 @@ resource "aws_cloudfront_distribution" "web_app_cdn" {
       restriction_type = "none"
     }
   }
-
-  tags = {
-    Name = "WebAppCDN"
-  }
 }
 
-# --- Seguridad ---
-resource "aws_cognito_user_pool" "user_pool" {
-  name = "${var.project_name}-user-pool-${var.environment}"
-  # TODO: Configurar políticas de contraseña, MFA, y otros detalles.
-  tags = {
-    Name = "UserPool"
-  }
-}
-
-resource "aws_wafv2_web_acl" "web_app_firewall" {
-  name  = "${var.project_name}-waf-${var.environment}"
-  scope = "CLOUDFRONT"
-  # TODO: Definir las reglas específicas del WAF (ej. AWS Managed Rules).
-  default_action {
-    allow {}
-  }
-  visibility_config {
-    cloudwatch_metrics_enabled = true
-    metric_name                = "WebAppFirewall"
-    sampled_requests_enabled   = true
-  }
-  tags = {
-    Name = "WebAppFirewall"
-  }
-}
-
-# --- API y Cómputo (API Gateway & Lambda) ---
-resource "aws_api_gateway_rest_api" "main_api_gateway" {
-  name        = "${var.project_name}-api-${var.environment}"
-  description = "Punto de entrada para las APIs del proyecto."
-  tags = {
-    Name = "MainAPIGateway"
-  }
-}
-
-resource "aws_lambda_function" "list_items_function" {
-  function_name = "ListItemsFunction"
-  handler       = "index.handler"
-  runtime       = "nodejs20.x" # TODO: Confirmar runtime y handler
-  role          = aws_iam_role.lambda_exec_role.arn
-  filename      = "lambda_code/list_items.zip" # TODO: Subir el código fuente de la Lambda
-  tags = {
-    Name = "ListItemsFunction"
-  }
-}
-
-resource "aws_lambda_function" "create_items_function" {
-  function_name = "CreateItemsFunction"
-  handler       = "index.handler"
-  runtime       = "nodejs20.x" # TODO: Confirmar runtime y handler
-  role          = aws_iam_role.lambda_exec_role.arn
-  filename      = "lambda_code/create_items.zip" # TODO: Subir el código fuente de la Lambda
-  tags = {
-    Name = "CreateItemsFunction"
-  }
-}
-
-# --- IAM ---
-resource "aws_iam_role" "lambda_exec_role" {
-  name = "lambda_execution_role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Action = "sts:AssumeRole",
-      Effect = "Allow",
-      Principal = {
-        Service = "lambda.amazonaws.com"
-      }
-    }]
-  })
-  # TODO: Adjuntar políticas con los permisos necesarios para las Lambdas.
-  tags = {
-    Name = "AppIAM"
-  }
+# ---------------------------------------------------------
+# 14. S3 Bucket (SPA)
+# JSON ID: S3_SPA_Codigo_estatico
+# ---------------------------------------------------------
+resource "aws_s3_bucket" "S3_SPA_Codigo_estatico" {
+  bucket = "mi-bucket-spa-prod-xy123"
 }
