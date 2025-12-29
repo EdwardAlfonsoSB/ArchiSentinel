@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Plantilla con DRIFT (Adicional: DeleteItemsFunction)
+
+Resources:
+  # --- BLOQUE BASE (IGUAL AL ANTERIOR) ---
+  DataS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-data-bucket"
+
+  MainAPIGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${AWS::StackName}-MainAPI"
+
+  ProcessingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-Processing"
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => { return "Process"; };
+
+  MetadataDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  MessageQueue:
+    Type: AWS::SQS::Queue
+
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+
+  AppLogs:
+    Type: AWS::Logs::LogGroup
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  # --- AQUÍ ESTÁ EL DRIFT (EL COMPONENTE EXTRA) ---
+  DeleteItemsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-DeleteItemsFunction"
+      Runtime: nodejs20.x 
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        # Simplificado para que el parser funcione sin bucket real
+        ZipFile: |
+          exports.handler = async (event) => { return "Deleted"; };
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-DeleteItemsFunction"
