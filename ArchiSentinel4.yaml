@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Plantilla base ajustada para ArchiSentinel (Cero Diferencias)
+
+Resources:
+  # 1. Bucket de Datos (JSON: DataS3Bucket)
+  DataS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-data-bucket"
+      Tags:
+        - Key: Name
+          Value: Bucket de Datos
+
+  # 2. API Gateway (JSON: MainAPIGateway)
+  MainAPIGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${AWS::StackName}-MainAPI"
+      Description: Punto de entrada para las APIs
+
+  # 3. Lambda Procesamiento (JSON: ProcessingLambda)
+  ProcessingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-Processing"
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => { return "Process"; };
+      Tags:
+        - Key: Name
+          Value: Lambda de Procesamiento
+
+  # 4. DynamoDB (JSON: MetadataDynamoDBTable)
+  MetadataDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Metadata"
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: Name
+          Value: Tabla de Metadatos
+
+  # 5. SQS Cola (JSON: MessageQueue)
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-Queue"
+      Tags:
+        - Key: Name
+          Value: Cola de Mensajes
+
+  # 6. SNS Topic (JSON: NotificationTopic)
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-Topic"
+      Tags:
+        - Key: Name
+          Value: Notificaciones
+
+  # 7. CloudWatch Logs (JSON: AppLogs)
+  AppLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-AppLogs"
+
+  # --- Recursos Auxiliares (No monitoreados por tu JSON, pero necesarios para validar) ---
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
